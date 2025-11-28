@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Trash2, Plus, RefreshCw, Trophy, Utensils, Users, Shuffle, MapPin, BarChart3, RotateCcw, CheckCircle2, LogIn, Share2, Copy } from 'lucide-react';
+import { Trash2, Plus, RefreshCw, Trophy, Utensils, Users, Shuffle, MapPin, BarChart3, RotateCcw, CheckCircle2, LogIn, Share2, Copy, AlertCircle, Loader2 } from 'lucide-react';
 
 // --- Firebase Imports ---
 import { initializeApp } from 'firebase/app';
@@ -12,10 +12,7 @@ import {
   signInWithCustomToken 
 } from 'firebase/auth';
 
-// --- 🔥🔥🔥 请修改这里 🔥🔥🔥 ---
-// 1. 去 console.firebase.google.com 创建项目
-// 2. 注册 Web 应用，复制 firebaseConfig 配置对象
-// 3. 将配置粘贴到下方 (保留引号)
+// --- 🔥 配置区域 🔥 ---
 const firebaseConfig = {
   apiKey: "AIzaSyDQZwutALwof2LdU-imM1kJSBzAhsJ52-4",
   authDomain: "chishenme-584f6.firebaseapp.com",
@@ -26,35 +23,32 @@ const firebaseConfig = {
 };
 
 // 初始化 Firebase
-// 如果你还没填配置，这里会报错，填好后就能正常运行
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-
-// 这个 ID 用于在数据库中区分应用，保持默认即可，不用改
-const appId = 'eating-vote-app'; 
 
 // --- Main Component ---
 const App = () => {
   // 用户状态
   const [user, setUser] = useState(null);
-  const [roomId, setRoomId] = useState(''); // 当前房间号
-  const [inputRoomId, setInputRoomId] = useState(''); // 输入框的房间号
+  const [authError, setAuthError] = useState(null);
+  const [roomId, setRoomId] = useState('');
+  const [inputRoomId, setInputRoomId] = useState('');
   const [joined, setJoined] = useState(false);
+  const [isJoining, setIsJoining] = useState(false); // 新增：加入房间的加载状态
 
-  // 房间数据 (从 Firestore 同步)
+  // 房间数据
   const [roomData, setRoomData] = useState({
     options: [
       "老火锅", "砂锅串串", "万州烤鱼", "重庆鸡公煲", 
       "韩式自助烤肉", "美蛙鱼头", "黔江鸡杂", "纸包鱼", 
       "把把烧/深夜烧烤", "干锅/香锅", "江湖菜", "酸萝卜老鸭汤"
     ],
-    votes: {}, // 格式: { userId: "老火锅" }
-    status: 'voting', // voting, revealed
+    votes: {}, 
+    status: 'voting', 
     finalWinner: null
   });
 
-  // 本地交互状态
   const [newOption, setNewOption] = useState('');
   const [currentDisplay, setCurrentDisplay] = useState('等待开始');
   const [isSpinning, setIsSpinning] = useState(false);
@@ -66,11 +60,15 @@ const App = () => {
         try {
             await signInAnonymously(auth);
         } catch (error) {
-            console.error("登录失败，请检查 Firebase Authentication 是否开启了匿名登录", error);
+            console.error("登录失败", error);
+            setAuthError("无法连接服务器，请检查网络或 Firebase 配置。");
         }
     };
     initAuth();
-    const unsubscribe = onAuthStateChanged(auth, setUser);
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      if(u) setAuthError(null);
+    });
     return () => unsubscribe();
   }, []);
 
@@ -78,15 +76,16 @@ const App = () => {
   useEffect(() => {
     if (!user || !roomId) return;
 
-    // 使用你自己的路径
     const roomRef = doc(db, 'rooms', roomId);
     
+    // 监听数据变化
     const unsubscribe = onSnapshot(roomRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         setRoomData(prev => ({
           ...prev,
           ...data,
+          // 防止 options 被清空导致报错
           options: data.options && data.options.length > 0 ? data.options : prev.options
         }));
         
@@ -95,7 +94,8 @@ const App = () => {
         }
       }
     }, (error) => {
-      console.error("数据同步错误: 请检查 Firebase Firestore 是否开启了 Test Mode (测试模式)", error);
+      console.error("同步失败:", error);
+      alert("数据同步断开，请尝试刷新页面。\n错误: " + error.message);
     });
 
     return () => unsubscribe();
@@ -103,13 +103,23 @@ const App = () => {
 
   // --- 业务逻辑 ---
 
-  const handleJoinRoom = async (e) => {
-    e.preventDefault();
+  const handleJoinRoom = async () => {
     const targetRoomId = inputRoomId.trim().toUpperCase();
-    if (!targetRoomId) return;
+    if (!targetRoomId) {
+      alert("请输入房间号");
+      return;
+    }
+    
+    if (!user) {
+      alert("正在连接服务器，请稍后...");
+      return;
+    }
+
+    setIsJoining(true); // 开始转圈圈
 
     const roomRef = doc(db, 'rooms', targetRoomId);
     try {
+      // 尝试写入，如果权限不够(Rule没开)这里会报错
       await setDoc(roomRef, {
         lastActive: new Date().toISOString()
       }, { merge: true });
@@ -118,7 +128,13 @@ const App = () => {
       setJoined(true);
     } catch (err) {
       console.error("加入房间失败:", err);
-      alert("加入房间失败。请检查：\n1. firebaseConfig 是否填对？\n2. Firestore 是否创建并开启了 Test Mode？");
+      if (err.code === 'permission-denied') {
+        alert("加入失败：权限不足。\n请去 Firebase 后台 -> Firestore Database -> Rules \n将 allow read, write 改为 if true");
+      } else {
+        alert("加入失败，请检查网络。\n" + err.message);
+      }
+    } finally {
+      setIsJoining(false); // 结束转圈圈
     }
   };
 
@@ -127,22 +143,18 @@ const App = () => {
     setInputRoomId(randomId);
   };
 
+  // ... (其他逻辑保持不变)
   const startSpin = () => {
     if (isSpinning || roomData.status === 'revealed') return;
     if (roomData.options.length < 2) return;
-
     setIsSpinning(true);
-    
     let speed = 50;
     let counter = 0;
     const totalSpins = 20 + Math.floor(Math.random() * 15);
-
     const spin = () => {
       const randomIndex = Math.floor(Math.random() * roomData.options.length);
       setCurrentDisplay(roomData.options[randomIndex]);
-      
       counter++;
-
       if (counter < totalSpins) {
         if (counter > totalSpins - 10) speed += 30;
         else if (counter > totalSpins - 5) speed += 60;
@@ -150,20 +162,17 @@ const App = () => {
       } else {
         const finalIndex = Math.floor(Math.random() * roomData.options.length);
         const result = roomData.options[finalIndex];
-        
         setCurrentDisplay(result);
         submitVote(result);
         setIsSpinning(false);
       }
     };
-
     spin();
   };
 
   const submitVote = async (voteResult) => {
     if (!user || !roomId) return;
     const roomRef = doc(db, 'rooms', roomId);
-    
     await updateDoc(roomRef, {
       [`votes.${user.uid}`]: voteResult
     });
@@ -171,17 +180,14 @@ const App = () => {
 
   const handleRevealResult = async () => {
     if (!user || !roomId) return;
-    
     const counts = {};
     const currentVotes = Object.values(roomData.votes || {});
     if (currentVotes.length === 0) return;
-
     currentVotes.forEach(v => counts[v] = (counts[v] || 0) + 1);
     let maxCount = 0;
     Object.values(counts).forEach(c => { if (c > maxCount) maxCount = c; });
     const candidates = Object.keys(counts).filter(k => counts[k] === maxCount);
     const final = candidates[Math.floor(Math.random() * candidates.length)];
-
     const roomRef = doc(db, 'rooms', roomId);
     await updateDoc(roomRef, {
       status: 'revealed',
@@ -233,6 +239,7 @@ const App = () => {
     alert("房间号已复制！发给朋友们吧");
   };
 
+  // --- 登录/加入界面 ---
   if (!joined) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-red-50 to-orange-100 flex items-center justify-center p-4">
@@ -242,8 +249,25 @@ const App = () => {
               <Utensils size={32} />
             </div>
             <h1 className="text-2xl font-black text-slate-800">重庆聚餐投票器</h1>
-            <p className="text-slate-500 text-sm mt-2">联机版 · 实时同步</p>
+            <div className="flex justify-center items-center gap-2 mt-2">
+              {user ? (
+                <span className="text-green-600 text-xs font-bold bg-green-100 px-2 py-1 rounded-full flex items-center gap-1">
+                  <CheckCircle2 size={10}/> 服务器已连接
+                </span>
+              ) : (
+                <span className="text-orange-500 text-xs font-bold bg-orange-100 px-2 py-1 rounded-full flex items-center gap-1 animate-pulse">
+                  <Loader2 size={10} className="animate-spin"/> 连接中...
+                </span>
+              )}
+            </div>
           </div>
+
+          {authError && (
+            <div className="mb-4 p-3 bg-red-50 text-red-600 text-xs rounded-xl flex items-start gap-2">
+              <AlertCircle size={16} className="shrink-0 mt-0.5" />
+              {authError}
+            </div>
+          )}
 
           <div className="space-y-4">
             <div>
@@ -261,10 +285,16 @@ const App = () => {
 
             <button 
               onClick={handleJoinRoom}
-              disabled={!inputRoomId}
-              className="w-full bg-red-600 text-white font-bold py-4 rounded-xl shadow-lg shadow-red-200 hover:bg-red-700 active:scale-95 transition-all disabled:opacity-50 disabled:shadow-none"
+              disabled={!inputRoomId || isJoining || !user}
+              className="w-full bg-red-600 text-white font-bold py-4 rounded-xl shadow-lg shadow-red-200 hover:bg-red-700 active:scale-95 transition-all disabled:opacity-50 disabled:shadow-none flex items-center justify-center gap-2"
             >
-              加入房间
+              {isJoining ? (
+                <>
+                  <Loader2 className="animate-spin" size={20} /> 正在进入...
+                </>
+              ) : (
+                "加入房间"
+              )}
             </button>
             
             <div className="relative py-4">
@@ -279,14 +309,12 @@ const App = () => {
               创建新房间
             </button>
           </div>
-          <p className="text-center mt-6 text-xs text-slate-400">
-            确保已在代码中填入 firebaseConfig
-          </p>
         </div>
       </div>
     );
   }
 
+  // --- 主界面 ---
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-10">
       
