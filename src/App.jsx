@@ -17,12 +17,12 @@ import {
 // 2. 注册 Web 应用，复制 firebaseConfig 配置对象
 // 3. 将配置粘贴到下方 (保留引号)
 const firebaseConfig = {
-  apiKey: "AIzaSyD-xxxxxxxxxxxxxxxxxxxxxxxx",
-  authDomain: "your-project-id.firebaseapp.com",
-  projectId: "your-project-id",
-  storageBucket: "your-project-id.appspot.com",
-  messagingSenderId: "123456789",
-  appId: "1:123456789:web:abcdef123456"
+  apiKey: "AIzaSyDQZwutALwof2LdU-imM1kJSBzAhsJ52-4",
+  authDomain: "chishenme-584f6.firebaseapp.com",
+  projectId: "chishenme-584f6",
+  storageBucket: "chishenme-584f6.firebasestorage.app",
+  messagingSenderId: "105612040568",
+  appId: "1:105612040568:web:fea6b0045fb8db5644908d"
 };
 
 // 初始化 Firebase
